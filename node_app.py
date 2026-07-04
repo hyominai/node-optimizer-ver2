@@ -4,39 +4,23 @@ import matplotlib.pyplot as plt
 import platform
 from matplotlib import rcParams
 
-import subprocess
-try:
-    subprocess.run(["apt-get", "install", "-y", "fonts-nanum"], capture_output=True)
-    import matplotlib.font_manager as fm
-    fm._load_fontmanager(try_read_cache=False)
-except:
-    pass
-
 if platform.system() == "Windows":
     plt.rcParams["font.family"] = "Malgun Gothic"
 elif platform.system() == "Darwin":
     plt.rcParams["font.family"] = "AppleGothic"
 else:
-    # Streamlit Cloud (Linux)
-    nanum = [f.name for f in fm.fontManager.ttflist if 'Nanum' in f.name]
-    if nanum:
-        plt.rcParams["font.family"] = nanum[0]
-    else:
-        plt.rcParams["font.family"] = "DejaVu Sans"
+    plt.rcParams["font.family"] = "DejaVu Sans"
 rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(page_title="결절점 자동 최적화 모델", page_icon="🏢", layout="wide")
-
 st.markdown("""
 <style>
-    .main { background-color: #f8f9fa; }
-    h1 { color: #1a1a2e; font-size: 1.8rem !important; }
-    h2 { color: #16213e; font-size: 1.2rem !important; border-bottom: 2px solid #0f3460; padding-bottom: 4px; }
-</style>
-""", unsafe_allow_html=True)
+h1{color:#1a1a2e;font-size:1.8rem!important}
+h2{color:#16213e;font-size:1.2rem!important;border-bottom:2px solid #0f3460;padding-bottom:4px}
+</style>""", unsafe_allow_html=True)
 
 st.title("🏢 결절점(Node) 자동 최적화 모델")
-st.caption("전국 범용 버전 — 지역 데이터를 입력하면 최적 주·상·커 비율 및 사업성을 자동 산출합니다")
+st.caption("전국 범용 버전 — 지역 데이터 입력 시 최적 주·상·커 비율 및 사업성 자동 산출")
 
 # ==========================================
 # 사이드바
@@ -47,55 +31,61 @@ with st.sidebar:
     st.subheader("물리 변수")
     site_area = st.number_input("대지면적 (㎡)", value=12267, step=100)
     far_pct   = st.slider("목표 용적률 (%)", 200, 1500, 1000, step=100)
-    far       = far_pct / 100
-    total_gfa = site_area * far
+    total_gfa = site_area * far_pct / 100
     st.caption(f"총 연면적: {total_gfa:,.0f} ㎡")
 
     st.subheader("건물 형태 (포디움 + 타워)")
-    podium_area = st.number_input("포디움 바닥면적 (㎡)", value=9000, step=100)
+    podium_area = st.number_input("포디움 바닥면적 (㎡)", value=8500, step=100)
     tower_area  = st.number_input("타워 1개동 바닥면적 (㎡)", value=800, step=50)
-    tower_count = 3  # 타워 고정 3개동
+    tower_count = 3
+
+    st.subheader("공사비 단가 (원/㎡)")
+    st.caption("고층할증·지역보정 적용 후 단가")
+    capex_res_base  = st.number_input("주거동", value=2335142, step=10000)
+    capex_com_base  = st.number_input("상업동", value=3806595, step=10000)
+    capex_comm_base = st.number_input("커뮤니티동", value=3806595, step=10000)
+    st.caption("커뮤니티 건설비를 0으로 입력하면 시(市) 부담으로 처리")
 
     st.subheader("공시지가 / 철거비")
-    land_price   = st.number_input("개별공시지가 (원/㎡)", value=2826000, step=10000)
-    demo_price   = st.number_input("철거비 (원/㎡, 대지기준)", value=106500, step=1000)
-
-    st.subheader("공사비 단가")
-    st.caption("타워 층수에 따라 고층 할증 자동 반영")
-    st.info("주거: 국토부 기본형건축비 2,292,000원 × 고층할증 × 충남보정(0.98)\n상업·커뮤니티: 복합청사 3,734,000원 × 1.04 × 0.98")
+    land_price = st.number_input("개별공시지가 (원/㎡)", value=2826000, step=10000)
+    demo_price = st.number_input("철거비 (원/㎡)", value=106500, step=1000)
 
     st.subheader("PF 구조")
-    eq_ratio   = st.slider("자기자본 비율 (%)", 10, 50, 30, step=5)
-    loan_rate  = st.slider("대출 금리 (%)", 3.0, 8.0, 5.0, step=0.5)
-    loan_tenor = st.slider("대출 상환 기간 (년)", 5, 20, 15, step=1)
+    eq_ratio      = st.slider("자기자본 비율 (%)", 10, 50, 30, step=5)
+    hug_pct       = st.slider("HUG 융자 비율 (주거 건설비 중 %)", 0, 100, 80, step=5)
+    loan_rate_hug = st.slider("HUG 금리 (%)", 1.0, 3.0, 2.0, step=0.5)
+    loan_rate_pf  = st.slider("민간PF 금리 (%)", 3.0, 8.0, 5.0, step=0.5)
+    loan_tenor    = st.slider("대출 상환 기간 (년)", 5, 20, 15, step=1)
+    const_period  = st.slider("공사 기간 (년)", 1, 4, 2, step=1)
 
     st.subheader("환경 변수")
     vac_local  = st.slider("지역 상권 공실률 (%)", 0.0, 60.0, 21.6, step=0.1)
-    node_count = st.slider("반경 1km 내 기존 Node 수", 0, 20, 19, step=1)
-    deficit_comm = st.number_input("커뮤니티 월 적자 (원/㎡)", value=16667, step=100)
-    alpha = st.select_slider(
-        "커뮤니티 1,000㎡당 공실률 감소 (α)",
-        options=[0.0, 0.5, 1.0, 1.5], value=1.0,
-        format_func=lambda x: f"{x}%p"
-    )
+    node_count = st.slider("반경 1km 내 기존 Node 수", 0, 3, 1, step=1)
+
+    st.subheader("지역 인구 데이터")
+    total_pop  = st.number_input("행정동 총 인구 (명)", value=28795, step=100)
+    solo_hh    = st.number_input("1인가구 수 (가구)", value=7140, step=100)
+    existing_lib   = st.slider("기존 도서관 수 (반경 1km)", 0, 5, 0)
+    existing_sport = st.slider("기존 체육시설 수 (반경 1km)", 0, 5, 1)
 
     st.markdown("---")
     st.subheader("📅 연도별 임대료/공실률")
     st.markdown("**주거**")
-    rent_res_1  = st.number_input("주거 임대료 (원/㎡·월)", value=15000, step=500)
-    vac_res_1   = st.slider("초기 공실률 1년차 (%)", 0, 40, 15)
-    vac_res_2   = st.slider("안정화 공실률 2~5년차 (%)", 0, 30, 8)
-    vac_res_3   = st.slider("성숙기 공실률 6년차~ (%)", 0, 20, 5)
-    opex_res    = st.number_input("주거 운영비 (원/㎡·월)", value=1600, step=100)
+    rent_res   = st.number_input("주거 임대료 (원/㎡·월)", value=15000, step=500)
+    vac_res_1  = st.slider("초기 공실률 1년차 (%)", 0, 40, 15)
+    vac_res_2  = st.slider("안정화 공실률 2~5년차 (%)", 0, 30, 8)
+    vac_res_3  = st.slider("성숙기 공실률 6년차~ (%)", 0, 20, 5)
+    opex_res   = st.number_input("주거 운영비 (원/㎡·월)", value=1600, step=100)
 
     st.markdown("**상업**")
-    rent_com    = st.number_input("상업 임대료 (원/㎡·월)", value=40000, step=1000)
-    vac_com_raw = st.slider("상업 공실률 (%)", 0, 50, 15)
-    opex_com    = st.number_input("상업 운영비 (원/㎡·월)", value=3000, step=100)
+    rent_com   = st.number_input("상업 임대료 (원/㎡·월)", value=40000, step=1000)
+    vac_com    = st.slider("상업 공실률 (%)", 0, 50, 15)
+    opex_com   = st.number_input("상업 운영비 (원/㎡·월)", value=3000, step=100)
+    comm_mgmt  = st.number_input("커뮤니티 공용관리비 (원/㎡·월)", value=1600, step=100)
 
     st.markdown("**NPV**")
     discount_rate = st.slider("할인율 (실질, %)", 3.0, 10.0, 6.0, step=0.5)
-    analysis_yrs  = st.slider("분석 기간 (년)", 10, 30, 20)
+    analysis_yrs  = st.slider("분석 기간 (년)", 10, 30, 30)
 
 # ==========================================
 # 계산 함수
@@ -107,65 +97,13 @@ def get_com_cap(vac):
     elif vac < 35: return 8.0
     else:          return 5.0
 
-def get_mes(nodes):
-    if nodes <= 2:  return 8.0
-    elif nodes <= 5: return 5.0
-    else:            return 3.0
+def calc_comm_ratio(pop, solo, lib_exist, sport_exist, gfa):
+    lib_need   = max(0, pop/20000 - lib_exist) * 264
+    sport_need = max(0, pop/10000 - sport_exist) * 400
+    solo_need  = solo * 0.5
+    total_need = lib_need + sport_need + solo_need
+    return total_need / gfa * 100, total_need, lib_need, sport_need, solo_need
 
-def get_noi_res(rent, vac, opex):
-    return rent * (1 - vac/100) - opex
-
-def get_noi_com(rent, vac, opex):
-    return rent * (1 - vac/100) - opex
-
-def run_optimizer(com_cap, mes, noi_r, noi_c, deficit, gfa):
-    valid_c, csi_vals = [], []
-    for c in np.arange(mes, 100 - com_cap, 0.1):
-        res = 100.0 - com_cap - c
-        r_n = (res/100)*gfa*noi_r
-        c_n = (com_cap/100)*gfa*noi_c
-        c_d = (c/100)*gfa*deficit
-        if c_d <= 0: continue
-        csi = (r_n + c_n) / c_d
-        if csi >= 2.0:
-            valid_c.append(round(c,1))
-            csi_vals.append(round(csi,3))
-    return valid_c, csi_vals
-
-def find_elbow(valid_c, csi_vals):
-    if len(valid_c) < 3: return 0
-    p1 = np.array([valid_c[0],  csi_vals[0],  0.0])
-    p2 = np.array([valid_c[-1], csi_vals[-1], 0.0])
-    dists = []
-    for i in range(len(valid_c)):
-        p3 = np.array([valid_c[i], csi_vals[i], 0.0])
-        d  = np.abs(np.cross(p2-p1, p3-p1)[2]) / (np.linalg.norm(p2-p1)+1e-10)
-        dists.append(d)
-    return int(np.argmax(dists))
-
-def calc_irr(cashflows, guess=0.05):
-    # 복수의 초기값으로 시도
-    for g in [0.05, 0.10, 0.01, -0.05, 0.20]:
-        try:
-            r = g
-            for _ in range(500):
-                try:
-                    npv  = sum(cf/((1+r)**t) for t,cf in enumerate(cashflows))
-                    dnpv = sum(-t*cf/((1+r)**(t+1)) for t,cf in enumerate(cashflows))
-                except:
-                    break
-                if abs(dnpv) < 1e-10: break
-                rn = r - npv/dnpv
-                if not (-2 < rn < 10): break  # 발산 방지
-                if abs(rn-r) < 1e-8: r=rn; break
-                r = rn
-            if -1 < r < 5:  # 합리적 범위 (-100% ~ 500%)
-                return r
-        except:
-            continue
-    return float('nan')
-
-# 고층 할증 함수
 def get_height_surcharge(floors):
     if floors <= 5:    return 1.01
     elif floors <= 10: return 1.03
@@ -173,346 +111,319 @@ def get_height_surcharge(floors):
     elif floors <= 20: return 1.05
     elif floors <= 25: return 1.06
     elif floors <= 30: return 1.07
-    else:              return 1.07 + ((floors - 30) // 5) * 0.01
+    else:              return 1.07 + ((floors-30)//5)*0.01
+
+def calc_irr(cashflows, guess=0.05):
+    for g in [0.05, 0.10, 0.01, -0.05, 0.20]:
+        try:
+            r = g
+            for _ in range(500):
+                pv  = sum(cf/((1+r)**t) for t,cf in enumerate(cashflows))
+                dpv = sum(-t*cf/((1+r)**(t+1)) for t,cf in enumerate(cashflows))
+                if abs(dpv) < 1e-10: break
+                rn = r - pv/dpv
+                if not (-2 < rn < 10): break
+                if abs(rn-r) < 1e-8: r=rn; break
+                r = rn
+            if -1 < r < 5: return r
+        except: continue
+    return float('nan')
 
 # ==========================================
-# 최적화 실행
+# Step 1: 커뮤니티 비율 (법적 기준)
 # ==========================================
-noi_res_unit = get_noi_res(rent_res_1, vac_res_3, opex_res)
-noi_com_unit = get_noi_com(rent_com, vac_com_raw, opex_com)
-com_cap_base = get_com_cap(vac_local)
-mes          = get_mes(node_count)
+opt_comm_raw, comm_area_need, lib_need, sport_need, solo_need = \
+    calc_comm_ratio(total_pop, solo_hh, existing_lib, existing_sport, total_gfa)
+opt_comm = max(3.0, round(opt_comm_raw, 1))
 
-comm_guess = mes
-valid_c, csi_vals = [], []
-for _ in range(20):
-    adj_vac = max(0, vac_local - (comm_guess/1000)*alpha*100)
-    com_cap = get_com_cap(adj_vac)
-    valid_c, csi_vals = run_optimizer(com_cap, mes, noi_res_unit, noi_com_unit, deficit_comm, total_gfa)
-    if not valid_c: break
-    idx = find_elbow(valid_c, csi_vals)
-    new_guess = valid_c[idx]
-    if abs(new_guess - comm_guess) < 0.2: comm_guess = new_guess; break
-    comm_guess = new_guess
+# Step 2: 상업 Cap
+opt_com = get_com_cap(vac_local)
 
-if not valid_c:
-    st.error("❌ CSI ≥ 2.0을 만족하는 커뮤니티 비율이 없습니다. 인풋값을 조정하세요.")
-    st.stop()
+# Step 3: 주거
+opt_res = round(100.0 - opt_com - opt_comm, 1)
+if opt_res < 0:
+    opt_comm = round(100.0 - opt_com - 10, 1)
+    opt_res  = 10.0
 
-idx      = find_elbow(valid_c, csi_vals)
-opt_comm = valid_c[idx]
-opt_csi  = csi_vals[idx]
-opt_com  = com_cap
-opt_res  = round(100.0 - opt_com - opt_comm, 1)
-csi_upper= valid_c[-1]
-adj_vac_final = max(0, vac_local - (opt_comm/1000)*alpha*100)
+# 면적
+area_res  = opt_res /100 * total_gfa
+area_com  = opt_com /100 * total_gfa
+area_comm = opt_comm/100 * total_gfa
 
 # 층수
-# 층수 (포디움 + 타워 구조)
-area_com_tot  = (opt_com /100) * total_gfa
-area_comm_tot = (opt_comm/100) * total_gfa
-area_res_tot  = (opt_res /100) * total_gfa
-floors_com    = max(1, round(area_com_tot  / podium_area))
-floors_comm   = max(1, round(area_comm_tot / podium_area))
-floors_res    = max(1, round(area_res_tot  / (tower_area * tower_count)))
-total_floors_int = floors_com + floors_comm + floors_res
+floors_com   = max(1, round(area_com  / podium_area))
+floors_comm  = max(1, round(area_comm / podium_area))
+floors_res   = max(1, round(area_res  / (tower_area * tower_count)))
+total_floors = floors_com + floors_comm + floors_res
+
 # CAPEX
-# 타워 층수 기반 고층 할증 자동 반영
-surcharge        = get_height_surcharge(floors_res)
-capex_res_unit   = 2292000 * surcharge * 0.98   # 기본단가 × 고층할증 × 충남보정
-capex_com_unit   = 3734000 * 1.04 * 0.98        # 복합청사 기준 (포디움 고정)
+surcharge       = get_height_surcharge(floors_res)
+capex_res_total = area_res * capex_res_base
+capex_com_total = area_com * capex_com_base
+capex_comm_total= area_comm * capex_comm_base
+capex_demo_total= site_area * demo_price
+capex_land_total= site_area * land_price
+total_capex     = capex_res_total + capex_com_total + capex_comm_total + capex_land_total + capex_demo_total
 
-capex_res_total  = (opt_res /100)*total_gfa * capex_res_unit
-capex_com_total  = (opt_com /100)*total_gfa * capex_com_unit
-capex_comm_total = (opt_comm/100)*total_gfa * capex_com_unit
-capex_demo       = site_area * demo_price
-capex_land       = site_area * land_price
-total_capex      = capex_res_total + capex_com_total + capex_comm_total + capex_demo + capex_land
+# 자금 조달
+deposit_res   = rent_res * 12 * area_res      # 주거 보증금 (월세 12개월)
+deposit_com   = 555232   * area_com           # 상업 보증금 (실측 중앙값)
+total_deposit = deposit_res + deposit_com     # 공사 시작 시 수령
 
-equity = total_capex * eq_ratio/100
-debt   = total_capex * (1 - eq_ratio/100)
-lr     = loan_rate/100
-af     = (lr*((1+lr)**loan_tenor))/(((1+lr)**loan_tenor)-1) if lr > 0 else 1/loan_tenor
-annual_ds = debt * af
+hug_amount    = capex_res_total * hug_pct/100  # HUG 융자액
+pf_amount     = total_capex - hug_amount        # 민간PF 융자액
 
-# 연도별 CF
-cf_list = [-equity]
-noi_list, ds_list, net_cf_list, cum_cf_list = [], [], [], []
-cum = -equity
+equity        = total_capex * eq_ratio/100
+# 보증금 → 대출 감소로만 반영 (이중계산 방지)
+debt          = max(0, total_capex*(1-eq_ratio/100) - total_deposit)
+
+hug_ratio     = hug_amount / total_capex
+blended_rate  = loan_rate_hug/100 * hug_ratio + loan_rate_pf/100 * (1-hug_ratio)
+lr            = blended_rate
+af            = (lr*(1+lr)**loan_tenor)/((1+lr)**loan_tenor-1) if lr>0 else 1/loan_tenor
+annual_ds     = debt * af
+
+# NOI
+def get_noi(vac_r):
+    nr = rent_res*(1-vac_r/100) - opex_res
+    nc = rent_com*(1-vac_com/100) - opex_com
+    cc = comm_mgmt * area_comm * 12
+    return (area_res*nr + area_com*nc)*12 - cc
+
+# CF (공사기간 반영)
+# 0년차: 자기자본 투입 (보증금은 대출 감소로 반영)
+initial_cf = -equity
+cf_list    = [initial_cf]
+noi_list, ds_list, net_list, cum_list = [], [], [], []
+cum     = initial_cf
 payback = None
+
 for y in range(1, analysis_yrs+1):
-    vac_r = vac_res_1 if y==1 else (vac_res_2 if y<=5 else vac_res_3)
-    noi_r = get_noi_res(rent_res_1, vac_r, opex_res)
-    noi_c = get_noi_com(rent_com, vac_com_raw, opex_com)
-    annual_noi = ((opt_res/100)*total_gfa*noi_r + (opt_com/100)*total_gfa*noi_c
-                  - (opt_comm/100)*total_gfa*deficit_comm)*12
-    ds  = annual_ds if y <= loan_tenor else 0
-    net = annual_noi - ds
-    cum += net
-    noi_list.append(annual_noi/1e8)
+    if y <= const_period:
+        # 공사 기간: NOI 없음, 대출 이자만
+        interest = debt * blended_rate
+        noi   = 0
+        ds    = interest  # 공사중 이자만
+    else:
+        op_y  = y - const_period  # 운영 연도
+        vac_r = vac_res_1 if op_y==1 else (vac_res_2 if op_y<=5 else vac_res_3)
+        noi   = get_noi(vac_r)
+        ds    = annual_ds if y <= loan_tenor + const_period else 0
+    net   = noi - ds
+    cum  += net
+    noi_list.append(noi/1e8)
     ds_list.append(ds/1e8)
-    net_cf_list.append(net/1e8)
-    cum_cf_list.append(cum/1e8)
+    net_list.append(net/1e8)
+    cum_list.append(cum/1e8)
     cf_list.append(net)
     if payback is None and cum >= 0: payback = y
 
-# 성숙기 NOI
-ann_res = (opt_res/100)*total_gfa*noi_res_unit*12/1e8
-ann_com = (opt_com/100)*total_gfa*noi_com_unit*12/1e8
-ann_def = (opt_comm/100)*total_gfa*deficit_comm*12/1e8
-ann_noi = ann_res + ann_com - ann_def
+npv_val = sum(cf/(1+discount_rate/100)**t for t,cf in enumerate(cf_list))/1e8
+irr_val = calc_irr(cf_list)*100
 
-npv_val = sum(cf/(1+discount_rate/100)**t for t,cf in enumerate(cf_list)) / 1e8
-irr_val = calc_irr(cf_list) * 100
-
-feasible = ann_noi > 0 and opt_csi >= 2.0
+ann_noi = get_noi(vac_res_3)/1e8
+funding_gap = max(0, -npv_val)
 
 # ==========================================
 # 메인 화면
 # ==========================================
-# 상단 KPI
 c1,c2,c3,c4,c5,c6 = st.columns(6)
 c1.metric("주거", f"{opt_res}%", f"{floors_res}층")
 c2.metric("상업", f"{opt_com}%", f"{floors_com}층")
 c3.metric("커뮤니티", f"{opt_comm}%", f"{floors_comm}층")
 c4.metric("총 CAPEX", f"{total_capex/1e8:.0f}억")
 c5.metric(f"{analysis_yrs}년 NPV", f"{npv_val:+.0f}억")
-if np.isnan(irr_val):
-    c6.metric("IRR", "계산불가", "NPV 음수 구간")
-else:
-    c6.metric("IRR", f"{irr_val:.1f}%", "≥ 할인율 ✅" if irr_val >= discount_rate else "< 할인율 ❌")
+c6.metric("IRR", f"{irr_val:.1f}%" if not np.isnan(irr_val) else "계산중",
+          "≥ 할인율 ✅" if not np.isnan(irr_val) and irr_val>=discount_rate else "< 할인율")
 
 st.markdown("---")
 
-# 탭 구성
 tab1, tab2, tab3 = st.tabs(["📊 최적화 결과", "💰 현금흐름(CF)", "⚙️ 상세 검증"])
 
-# ─── 탭1: 최적화 결과 ───
+# ─── 탭1 ───
 with tab1:
     left, right = st.columns([1.3, 1])
 
     with left:
-        st.header("CSI 곡선 & 파레토 최적점")
-        fig, ax = plt.subplots(figsize=(8, 4.5))
-        ax.plot(valid_c, csi_vals, color='#0f3460', linewidth=2.5, label='CSI curve')
-        ax.plot([valid_c[0],valid_c[-1]],[csi_vals[0],csi_vals[-1]],'k--',alpha=0.3,linewidth=1,label='Reference line')
-        ax.plot(opt_comm, opt_csi, 'o', color='#e94560', markersize=12, zorder=5,
-                label=f'파레토 최적점 ({opt_comm}%, CSI {opt_csi:.1f}x)')
-        ax.axhline(y=2.0, color='#e94560', linestyle='-', linewidth=1.5, alpha=0.7, label='CSI=2.0 부도선')
-        ax.axvline(x=mes, color='#2ecc71', linestyle='--', linewidth=1.2, alpha=0.8, label=f'MES 하한 ({mes}%)')
-        ax.axvline(x=csi_upper, color='#f39c12', linestyle='--', linewidth=1.2, alpha=0.8, label=f'CSI 상한 ({csi_upper}%)')
-        ax.fill_betweenx([2.0, max(csi_vals)*1.05], mes, csi_upper, alpha=0.06, color='#2ecc71', label='생존 구간')
-        ax.set_xlabel('커뮤니티 비율 (%)')
-        ax.set_ylabel('교차보조 지수 (CSI)')
-        ax.legend(fontsize=8, loc='upper right')
-        ax.grid(True, linestyle='--', alpha=0.4)
-        ax.set_facecolor('#fafafa')
-        fig.patch.set_facecolor('white')
-        plt.tight_layout()
-        st.pyplot(fig); plt.close()
+        st.header("Step 1: 커뮤니티 비율 (법적 기준)")
+        st.markdown(f"""
+| 시설 | 근거 | 필요면적 |
+|------|------|:-------:|
+| 도서관 | 한국도서관기준 2만명당 1개 | **{lib_need:.0f}㎡** |
+| 체육시설 | 국민체육진흥법 1만명당 1개 | **{sport_need:.0f}㎡** |
+| 1인가구 공용공간 | {solo_hh:,}가구 × 0.5㎡ | **{solo_need:.0f}㎡** |
+| **합계** | | **{comm_area_need:.0f}㎡ ({opt_comm_raw:.1f}%)** |
+| **채택 비율** | 최소 3% 이상 | **{opt_comm}%** |
+""")
 
-        # 연도별 NOI 테이블
-        st.header("연도별 NOI 구성")
+        st.header("Step 2~3: 상업 Cap → 주거 확정")
+        st.markdown(f"""
+| 단계 | 값 | 근거 |
+|------|:--:|------|
+| 상업 Cap | {opt_com}% | 지역 공실률 {vac_local}% 기반 |
+| 주거 | {opt_res}% | 100% - 상업 - 커뮤니티 잔여 |
+""")
+
+        # 연도별 NOI
+        st.header("연도별 NOI")
         rows = []
-        for label, vac_r in [("1년차", vac_res_1),("2~5년차",vac_res_2),("6년차~",vac_res_3)]:
-            nr = get_noi_res(rent_res_1, vac_r, opex_res)
-            ra = (opt_res/100)*total_gfa*nr*12/1e8
-            ca = (opt_com/100)*total_gfa*noi_com_unit*12/1e8
-            da = (opt_comm/100)*total_gfa*deficit_comm*12/1e8
+        for label, vac_r in [("1년차",vac_res_1),("2~5년차",vac_res_2),("6년차~",vac_res_3)]:
+            nr = rent_res*(1-vac_r/100)-opex_res
+            nc = rent_com*(1-vac_com/100)-opex_com
+            ra = area_res*nr*12/1e8
+            ca = area_com*nc*12/1e8
+            cc = comm_mgmt*area_comm*12/1e8
             rows.append({"연차":label,"주거공실":f"{vac_r}%",
                          "주거NOI":f"+{ra:.1f}억","상업NOI":f"+{ca:.1f}억",
-                         "커뮤니티적자":f"-{da:.1f}억","통합NOI":f"+{ra+ca-da:.1f}억"})
+                         "커뮤니티":f"-{cc:.1f}억","통합NOI":f"+{ra+ca-cc:.1f}억"})
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
     with right:
-        st.header("건물 형태 시각화")
+        st.header("건물 형태")
+        fig2, ax2 = plt.subplots(figsize=(4, 7))
+        ax2.set_xlim(0,1); ax2.set_ylim(0,(floors_res+floors_com+floors_comm)*1.15)
+        ax2.set_facecolor('#f0f4f8'); fig2.patch.set_facecolor('white'); ax2.axis('off')
 
-        fig2, ax2 = plt.subplots(figsize=(6, 8))
-        ax2.set_xlim(0, 10)
-        ax2.set_ylim(0, (floors_res + floors_com + floors_comm) * 1.15)
-        ax2.set_facecolor('#f0f4f8')
-        fig2.patch.set_facecolor('white')
-        ax2.axis('off')
-
-        # 등축 투영 설정값
-        dx = 1.2   # 깊이 오프셋 x
-        dy = 0.5   # 깊이 오프셋 y
-
-        def draw_box(ax, x, y, w, h, d, color, label=None, fontsize=9):
-            """등축 투영 박스 그리기"""
-            # 앞면
+        dx, dy = 1.2, 0.5
+        def draw_box(ax, x, y, w, h, d, color, label=None, fs=9):
+            from matplotlib.patches import Polygon as MPoly
+            import matplotlib.colors as mc
+            rgb = mc.to_rgb(color)
+            dark = tuple(max(0,c-0.2) for c in rgb)
+            darker = tuple(max(0,c-0.35) for c in rgb)
             front = plt.Polygon([[x,y],[x+w,y],[x+w,y+h],[x,y+h]],
-                                  closed=True, facecolor=color, edgecolor='white', linewidth=0.8, alpha=0.95)
-            # 윗면
+                                  closed=True,facecolor=color,edgecolor='white',lw=0.8,alpha=0.95)
             top   = plt.Polygon([[x,y+h],[x+w,y+h],[x+w+d,y+h+dy],[x+d,y+h+dy]],
-                                  closed=True, facecolor=color, edgecolor='white', linewidth=0.8, alpha=0.75)
-            # 옆면
+                                  closed=True,facecolor=dark,edgecolor='white',lw=0.8,alpha=0.75)
             side  = plt.Polygon([[x+w,y],[x+w+d,y+dy],[x+w+d,y+h+dy],[x+w,y+h]],
-                                  closed=True, facecolor=color, edgecolor='white', linewidth=0.8, alpha=0.60)
-            for patch in [front, top, side]:
-                ax.add_patch(patch)
-            if label:
-                ax.text(x+w/2, y+h/2, label, ha='center', va='center',
-                        color='white', fontsize=fontsize, fontweight='bold', zorder=10)
+                                  closed=True,facecolor=darker,edgecolor='white',lw=0.8,alpha=0.60)
+            for p in [front,top,side]: ax.add_patch(p)
+            if label and h > 1:
+                ax.text(x+w/2,y+h/2,label,ha='center',va='center',
+                        color='white',fontsize=fs,fontweight='bold',zorder=10)
 
-        # 포디움 (상업)
-        pod_h_com  = floors_com
-        pod_h_comm = floors_comm
-        pod_w      = 7.0
-        pod_x      = 1.5
+        pod_x, pod_w = 1.5, 7.0
+        draw_box(ax2,pod_x,0,pod_w,floors_com,dx,'#4a9aba',
+                 f'상업\n{floors_com}층\n({opt_com:.0f}%)',10)
+        draw_box(ax2,pod_x,floors_com,pod_w,floors_comm,dx,'#2ecc71',
+                 f'커뮤니티\n{floors_comm}층\n({opt_comm:.0f}%)',10)
+        pod_top = floors_com+floors_comm
+        # 타워 3개동 - 포디움 위에 올라가도록
+        tw = 1.5
+        tgap = 0.35
+        txs = [pod_x + 0.2,
+               pod_x + tw + tgap + 0.2,
+               pod_x + (tw+tgap)*2 + 0.2]
+        for i,tx in enumerate(txs):
+            lbl = f'주거\n{floors_res}층' if i==1 else None
+            draw_box(ax2,tx,pod_top,tw,floors_res,dx*0.4,'#0f3460',lbl,9)
 
-        # 상업 포디움
-        draw_box(ax2, pod_x, 0, pod_w, pod_h_com, dx,
-                 '#4a9aba', f'상업\n{floors_com}층\n({opt_com:.0f}%)', fontsize=10)
+        # 포디움-타워 경계선
+        ax2.plot([pod_x-0.1, pod_x+pod_w+dx+0.1],
+                 [pod_top, pod_top],
+                 color='white', lw=2, zorder=5, linestyle='--')
 
-        # 커뮤니티 포디움
-        draw_box(ax2, pod_x, pod_h_com, pod_w, pod_h_comm, dx,
-                 '#2ecc71', f'커뮤니티\n{floors_comm}층\n({opt_comm:.0f}%)', fontsize=10)
-
-        pod_top = pod_h_com + pod_h_comm
-
-        # 타워 3개 (주거)
-        tower_w   = 1.6
-        tower_gap = 0.4
-        tower_h   = floors_res
-        tower_xs  = [pod_x + 0.3,
-                     pod_x + tower_w + tower_gap + 0.3,
-                     pod_x + (tower_w + tower_gap)*2 + 0.3]
-
-        for i, tx in enumerate(tower_xs):
-            label = f'주거\n{floors_res}층' if i==1 else None
-            draw_box(ax2, tx, pod_top, tower_w, tower_h, dx*0.5,
-                     '#0f3460', label, fontsize=9)
-
-        # 범례 텍스트
-        ax2.text(5, (floors_res+pod_top)*1.08,
-                 f'포디움 {pod_h_com+pod_h_comm}층 + 타워 {floors_res}층 × 3개동',
-                 ha='center', va='center', fontsize=10, color='#333',
-                 fontweight='bold')
-
+        ax2.text(5,(floors_res+pod_top)*1.06,
+                 f'포디움 {pod_top}층 + 타워 {floors_res}층 × 3동',
+                 ha='center',fontsize=9,color='#333',fontweight='bold')
         plt.tight_layout()
         st.pyplot(fig2); plt.close()
 
-        st.caption(f"포디움: 상업 {floors_com}층 + 커뮤니티 {floors_comm}층 | 타워 3개동 × {floors_res}층")
-
-        # CAPEX 구성
+        # CAPEX
         st.header("CAPEX 구성")
-        capex_items = {
-            "주거동": capex_res_total/1e8,
-            "상업동": capex_com_total/1e8,
-            "커뮤니티동": capex_comm_total/1e8,
-            "철거비": capex_demo/1e8,
-            "토지비": capex_land/1e8,
-        }
-        fig3, ax3 = plt.subplots(figsize=(5, 3))
+        capex_items = {"주거동":capex_res_total/1e8,"상업동":capex_com_total/1e8,
+                       "커뮤니티동":capex_comm_total/1e8,"철거비":capex_demo_total/1e8,"토지비":capex_land_total/1e8}
+        fig3, ax3 = plt.subplots(figsize=(5,3))
         colors_c = ['#0f3460','#4a9aba','#2ecc71','#e94560','#f39c12']
-        bars = ax3.barh(list(capex_items.keys()), list(capex_items.values()),
-                        color=colors_c, edgecolor='white')
-        for bar, val in zip(bars, capex_items.values()):
-            ax3.text(bar.get_width()+5, bar.get_y()+bar.get_height()/2,
-                     f'{val:.0f}억', va='center', fontsize=9)
+        bars = ax3.barh(list(capex_items.keys()),list(capex_items.values()),color=colors_c,edgecolor='white')
+        for bar,val in zip(bars,capex_items.values()):
+            ax3.text(bar.get_width()+2,bar.get_y()+bar.get_height()/2,
+                     f'{val:.0f}억',va='center',fontsize=9)
         ax3.set_xlabel('금액 (억원)')
-        ax3.set_title(f'총 CAPEX: {total_capex/1e8:.0f}억원 (주거 고층할증 {surcharge:.2f}배)', fontweight='bold')
+        ax3.set_title(f'총 CAPEX: {total_capex/1e8:.0f}억원 (고층할증 {surcharge:.2f}배)',fontweight='bold')
         ax3.set_facecolor('#fafafa'); fig3.patch.set_facecolor('white')
         ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
         plt.tight_layout()
         st.pyplot(fig3); plt.close()
 
-# ─── 탭2: 현금흐름 ───
+# ─── 탭2 ───
 with tab2:
-    st.header("연도별 현금흐름 (CF)")
-
+    st.header("연도별 현금흐름")
     years_list = list(range(1, analysis_yrs+1))
-
-    fig4, (ax4a, ax4b) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-
-    # 상단: NOI / 대출상환 / 순CF 막대
-    width = 0.3
+    fig4, (ax4a,ax4b) = plt.subplots(2,1,figsize=(12,8),sharex=True)
     x = np.array(years_list)
-    ax4a.bar(x - width, noi_list, width, color='#0f3460', alpha=0.8, label='연간 NOI')
-    ax4a.bar(x,        [-d for d in ds_list], width, color='#e94560', alpha=0.8, label='대출 상환')
-    ax4a.bar(x + width, net_cf_list, width, color='#2ecc71', alpha=0.8, label='순 CF')
-    ax4a.axhline(0, color='black', linewidth=0.8)
-    ax4a.set_ylabel('금액 (억원)')
-    ax4a.set_title('연도별 현금흐름', fontweight='bold')
-    ax4a.legend(fontsize=9)
-    ax4a.grid(True, linestyle='--', alpha=0.3)
-    ax4a.set_facecolor('#fafafa')
+    w = 0.28
+    ax4a.bar(x-w, noi_list, w, color='#0f3460', alpha=0.8, label='연간 NOI')
+    ax4a.bar(x,   [-d for d in ds_list], w, color='#e94560', alpha=0.8, label='대출 상환')
+    ax4a.bar(x+w, net_list, w, color='#2ecc71', alpha=0.8, label='순 CF')
+    ax4a.axhline(0,color='black',lw=0.8)
+    ax4a.set_ylabel('금액 (억원)'); ax4a.legend(fontsize=9)
+    ax4a.grid(True,linestyle='--',alpha=0.3); ax4a.set_facecolor('#fafafa')
+    ax4a.set_title('연도별 현금흐름',fontweight='bold')
 
-    # 하단: 누적 CF
-    colors_cum = ['#e94560' if v < 0 else '#2ecc71' for v in cum_cf_list]
-    ax4b.bar(x, cum_cf_list, color=colors_cum, alpha=0.7)
-    ax4b.plot(x, cum_cf_list, 'o-', color='#0f3460', linewidth=1.5, markersize=4)
-    ax4b.axhline(0, color='black', linewidth=1.2, linestyle='--')
+    colors_cum = ['#e94560' if v<0 else '#2ecc71' for v in cum_list]
+    ax4b.bar(x, cum_list, color=colors_cum, alpha=0.7)
+    ax4b.plot(x, cum_list, 'o-', color='#0f3460', lw=1.5, markersize=4)
+    ax4b.axhline(0,color='black',lw=1.2,linestyle='--')
     if payback:
-        ax4b.axvline(payback, color='#f39c12', linewidth=2,
-                     linestyle='--', label=f'투자 회수 {payback}년차')
+        ax4b.axvline(payback,color='#f39c12',lw=2,linestyle='--',label=f'투자회수 {payback}년차')
         ax4b.legend(fontsize=9)
-    ax4b.set_xlabel('연도')
-    ax4b.set_ylabel('누적 CF (억원)')
-    ax4b.set_title('누적 현금흐름 (손익분기점)', fontweight='bold')
-    ax4b.grid(True, linestyle='--', alpha=0.3)
-    ax4b.set_facecolor('#fafafa')
+    ax4b.set_xlabel('연도'); ax4b.set_ylabel('누적 CF (억원)')
+    ax4b.set_title('누적 현금흐름',fontweight='bold')
+    ax4b.grid(True,linestyle='--',alpha=0.3); ax4b.set_facecolor('#fafafa')
     ax4b.set_xticks(x)
-
     fig4.patch.set_facecolor('white')
     plt.tight_layout()
     st.pyplot(fig4); plt.close()
 
-    # CF 테이블
-    st.header("연도별 CF 상세")
-    cf_rows = []
-    for i, y in enumerate(years_list):
-        cf_rows.append({
-            "연도": f"{y}년차",
-            "연간NOI": f"+{noi_list[i]:.1f}억",
-            "대출상환": f"-{ds_list[i]:.1f}억",
-            "순CF": f"{net_cf_list[i]:+.1f}억",
-            "누적CF": f"{cum_cf_list[i]:+.1f}억",
-        })
-    st.dataframe(cf_rows, use_container_width=True, hide_index=True)
+    m1,m2,m3,m4,m5 = st.columns(5)
+    m1.metric("총 CAPEX", f"{total_capex/1e8:.0f}억")
+    m2.metric("보증금 활용", f"{total_deposit/1e8:.0f}억")
+    m3.metric("실질 대출", f"{debt/1e8:.0f}억")
+    m4.metric("투자 회수", f"{payback}년차" if payback else "초과")
+    m5.metric("Funding Gap", f"{funding_gap:.0f}억" if funding_gap>0 else "없음 ✅")
 
-    # 재무 요약
-    st.markdown("---")
-    m1,m2,m3,m4 = st.columns(4)
-    m1.metric("총 CAPEX",   f"{total_capex/1e8:.0f}억원")
-    m2.metric("자기자본",    f"{equity/1e8:.0f}억원", f"{eq_ratio}%")
-    m3.metric("투자 회수",   f"{payback}년차" if payback else "20년 초과")
-    if np.isnan(irr_val):
-        m4.metric("IRR", "계산불가", "NPV 음수 구간")
-    else:
-        m4.metric("IRR", f"{irr_val:.1f}%", f"할인율 {discount_rate}% {'✅' if irr_val>=discount_rate else '❌'}")
-
-# ─── 탭3: 상세 검증 ───
+# ─── 탭3 ───
 with tab3:
+    st.header("자금 조달 구조")
+    st.markdown(f"""
+| 항목 | 금액 | 금리 | 비고 |
+|------|-----:|:----:|------|
+| 주거동 건설비 | {capex_res_total/1e8:.0f}억 | {loan_rate_hug}% | HUG 공공지원 민간임대 융자 |
+| 상업동 건설비 | {capex_com_total/1e8:.0f}억 | {loan_rate_pf}% | 민간 PF |
+| 커뮤니티 건설비 | {capex_comm_total/1e8:.0f}억 | — | 시(市) 부담 시 0 입력 |
+| 토지비 + 철거비 | {(capex_land_total+capex_demo_total)/1e8:.0f}억 | {loan_rate_pf}% | 민간 PF |
+| 보증금 활용 | -{total_deposit/1e8:.0f}억 | — | 초기 대출 감소 |
+| **가중평균 금리** | | **{blended_rate*100:.2f}%** | |
+""")
+
     st.header("알고리즘 판정")
     checks = [
-        ("MES 하한", f"커뮤니티 {opt_comm}% ≥ {mes}%", opt_comm >= mes),
-        ("CSI 방어", f"CSI {opt_csi:.1f}배 ≥ 2.0", opt_csi >= 2.0),
-        ("NOI 양수", f"연간 +{ann_noi:.1f}억원", ann_noi > 0),
-        ("NPV 양수", f"{analysis_yrs}년 {npv_val:+.0f}억원", npv_val > 0),
-        ("IRR", f"{'계산불가' if np.isnan(irr_val) else f'{irr_val:.1f}%'} vs 할인율 {discount_rate}%", not np.isnan(irr_val) and irr_val >= discount_rate),
+        ("커뮤니티 법적 기준", f"{opt_comm}% (필요 {opt_comm_raw:.1f}%)", opt_comm >= opt_comm_raw),
+        ("NOI 양수", f"연간 +{ann_noi:.1f}억", ann_noi > 0),
+        (f"{analysis_yrs}년 NPV", f"{npv_val:+.0f}억", npv_val > 0),
+        ("IRR vs 할인율", f"{irr_val:.1f}% vs {discount_rate}%" if not np.isnan(irr_val) else "계산불가",
+         not np.isnan(irr_val) and irr_val >= discount_rate),
     ]
     for name, detail, ok in checks:
-        icon = "✅" if ok else "❌"
-        st.markdown(f"{icon} **{name}** — {detail}")
+        st.markdown(f"{'✅' if ok else '❌'} **{name}** — {detail}")
 
-    if feasible and npv_val > 0:
-        st.success("✅ 사업성 확인 — 지자체 보조금 없이 영구 자생 가능")
+    if funding_gap > 0:
+        st.warning(f"⚠️ Funding Gap: **{funding_gap:.0f}억원** — 공공기여 최소 필요액")
+        st.markdown(f"> 커뮤니티 건설비(시 부담) 외 추가 {funding_gap:.0f}억원의 공공지원 시 사업성 확보")
     else:
-        st.error("❌ 조건 미충족 — 인풋 조정 필요")
+        st.success("✅ 추가 공공지원 없이 자생 가능")
 
-    st.markdown("---")
     st.header("알고리즘 경로")
     st.markdown(f"""
-| 단계 | 값 |
-|------|---|
-| 지역 공실률 | {vac_local}% |
-| 상업 Cap (원본) | {com_cap_base}% |
-| 커뮤니티 보정 후 공실률 | {adj_vac_final:.1f}% |
-| 상업 Cap (보정 후) | {opt_com}% |
-| MES 하한 | {mes}% |
-| CSI 상한 | {csi_upper}% |
-| 파레토 최적점 | {opt_comm}% |
-| α | {alpha}%p/1,000㎡ |
+| 단계 | 내용 | 값 |
+|------|------|:--:|
+| Step 1 | 도서관 필요면적 | {lib_need:.0f}㎡ |
+| Step 1 | 체육시설 필요면적 | {sport_need:.0f}㎡ |
+| Step 1 | 1인가구 공용공간 | {solo_need:.0f}㎡ |
+| Step 1 | **커뮤니티 비율 확정** | **{opt_comm}%** |
+| Step 2 | 상업 Cap (공실률 {vac_local}%) | {opt_com}% |
+| Step 3 | **주거 비율 확정** | **{opt_res}%** |
+| Step 4 | 가중평균 금리 | {blended_rate*100:.2f}% |
+| Step 5 | 보증금 대출 감소 | {total_deposit/1e8:.0f}억 |
 """)
