@@ -4,12 +4,25 @@ import matplotlib.pyplot as plt
 import platform
 from matplotlib import rcParams
 
+import subprocess
+try:
+    subprocess.run(["apt-get", "install", "-y", "fonts-nanum"], capture_output=True)
+    import matplotlib.font_manager as fm
+    fm._load_fontmanager(try_read_cache=False)
+except:
+    pass
+
 if platform.system() == "Windows":
     plt.rcParams["font.family"] = "Malgun Gothic"
 elif platform.system() == "Darwin":
     plt.rcParams["font.family"] = "AppleGothic"
 else:
-    plt.rcParams["font.family"] = "DejaVu Sans"
+    # Streamlit Cloud (Linux)
+    nanum = [f.name for f in fm.fontManager.ttflist if 'Nanum' in f.name]
+    if nanum:
+        plt.rcParams["font.family"] = nanum[0]
+    else:
+        plt.rcParams["font.family"] = "DejaVu Sans"
 rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(page_title="결절점 자동 최적화 모델", page_icon="🏢", layout="wide")
@@ -48,9 +61,8 @@ with st.sidebar:
     demo_price   = st.number_input("철거비 (원/㎡, 대지기준)", value=106500, step=1000)
 
     st.subheader("공사비 단가")
-    st.caption("할증·보정 적용 후 단가 입력")
-    capex_res  = st.number_input("주거동 공사비 (원/㎡)", value=2335142, step=10000)
-    capex_com  = st.number_input("상업·커뮤니티 공사비 (원/㎡)", value=3806595, step=10000)
+    st.caption("타워 층수에 따라 고층 할증 자동 반영")
+    st.info("주거: 국토부 기본형건축비 2,292,000원 × 고층할증 × 충남보정(0.98)\n상업·커뮤니티: 복합청사 3,734,000원 × 1.04 × 0.98")
 
     st.subheader("PF 구조")
     eq_ratio   = st.slider("자기자본 비율 (%)", 10, 50, 30, step=5)
@@ -131,16 +143,37 @@ def find_elbow(valid_c, csi_vals):
         dists.append(d)
     return int(np.argmax(dists))
 
-def calc_irr(cashflows, guess=0.1):
-    r = guess
-    for _ in range(200):
-        npv  = sum(cf/(1+r)**t for t,cf in enumerate(cashflows))
-        dnpv = sum(-t*cf/(1+r)**(t+1) for t,cf in enumerate(cashflows))
-        if abs(dnpv) < 1e-10: break
-        rn = r - npv/dnpv
-        if abs(rn-r) < 1e-8: r=rn; break
-        r = rn
-    return r
+def calc_irr(cashflows, guess=0.05):
+    # 복수의 초기값으로 시도
+    for g in [0.05, 0.10, 0.01, -0.05, 0.20]:
+        try:
+            r = g
+            for _ in range(500):
+                try:
+                    npv  = sum(cf/((1+r)**t) for t,cf in enumerate(cashflows))
+                    dnpv = sum(-t*cf/((1+r)**(t+1)) for t,cf in enumerate(cashflows))
+                except:
+                    break
+                if abs(dnpv) < 1e-10: break
+                rn = r - npv/dnpv
+                if not (-2 < rn < 10): break  # 발산 방지
+                if abs(rn-r) < 1e-8: r=rn; break
+                r = rn
+            if -1 < r < 5:  # 합리적 범위 (-100% ~ 500%)
+                return r
+        except:
+            continue
+    return float('nan')
+
+# 고층 할증 함수
+def get_height_surcharge(floors):
+    if floors <= 5:    return 1.01
+    elif floors <= 10: return 1.03
+    elif floors <= 15: return 1.04
+    elif floors <= 20: return 1.05
+    elif floors <= 25: return 1.06
+    elif floors <= 30: return 1.07
+    else:              return 1.07 + ((floors - 30) // 5) * 0.01
 
 # ==========================================
 # 최적화 실행
@@ -184,9 +217,14 @@ floors_comm   = max(1, round(area_comm_tot / podium_area))
 floors_res    = max(1, round(area_res_tot  / (tower_area * tower_count)))
 total_floors_int = floors_com + floors_comm + floors_res
 # CAPEX
-capex_res_total  = (opt_res /100)*total_gfa * capex_res
-capex_com_total  = (opt_com /100)*total_gfa * capex_com
-capex_comm_total = (opt_comm/100)*total_gfa * capex_com
+# 타워 층수 기반 고층 할증 자동 반영
+surcharge        = get_height_surcharge(floors_res)
+capex_res_unit   = 2292000 * surcharge * 0.98   # 기본단가 × 고층할증 × 충남보정
+capex_com_unit   = 3734000 * 1.04 * 0.98        # 복합청사 기준 (포디움 고정)
+
+capex_res_total  = (opt_res /100)*total_gfa * capex_res_unit
+capex_com_total  = (opt_com /100)*total_gfa * capex_com_unit
+capex_comm_total = (opt_comm/100)*total_gfa * capex_com_unit
 capex_demo       = site_area * demo_price
 capex_land       = site_area * land_price
 total_capex      = capex_res_total + capex_com_total + capex_comm_total + capex_demo + capex_land
@@ -239,7 +277,10 @@ c2.metric("상업", f"{opt_com}%", f"{floors_com}층")
 c3.metric("커뮤니티", f"{opt_comm}%", f"{floors_comm}층")
 c4.metric("총 CAPEX", f"{total_capex/1e8:.0f}억")
 c5.metric(f"{analysis_yrs}년 NPV", f"{npv_val:+.0f}억")
-c6.metric("IRR", f"{irr_val:.1f}%", "≥ 할인율 ✅" if irr_val >= discount_rate else "< 할인율 ❌")
+if np.isnan(irr_val):
+    c6.metric("IRR", "계산불가", "NPV 음수 구간")
+else:
+    c6.metric("IRR", f"{irr_val:.1f}%", "≥ 할인율 ✅" if irr_val >= discount_rate else "< 할인율 ❌")
 
 st.markdown("---")
 
@@ -371,7 +412,7 @@ with tab1:
             ax3.text(bar.get_width()+5, bar.get_y()+bar.get_height()/2,
                      f'{val:.0f}억', va='center', fontsize=9)
         ax3.set_xlabel('금액 (억원)')
-        ax3.set_title(f'총 CAPEX: {total_capex/1e8:.0f}억원', fontweight='bold')
+        ax3.set_title(f'총 CAPEX: {total_capex/1e8:.0f}억원 (주거 고층할증 {surcharge:.2f}배)', fontweight='bold')
         ax3.set_facecolor('#fafafa'); fig3.patch.set_facecolor('white')
         ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
         plt.tight_layout()
@@ -437,7 +478,10 @@ with tab2:
     m1.metric("총 CAPEX",   f"{total_capex/1e8:.0f}억원")
     m2.metric("자기자본",    f"{equity/1e8:.0f}억원", f"{eq_ratio}%")
     m3.metric("투자 회수",   f"{payback}년차" if payback else "20년 초과")
-    m4.metric("IRR",        f"{irr_val:.1f}%", f"할인율 {discount_rate}% {'✅' if irr_val>=discount_rate else '❌'}")
+    if np.isnan(irr_val):
+        m4.metric("IRR", "계산불가", "NPV 음수 구간")
+    else:
+        m4.metric("IRR", f"{irr_val:.1f}%", f"할인율 {discount_rate}% {'✅' if irr_val>=discount_rate else '❌'}")
 
 # ─── 탭3: 상세 검증 ───
 with tab3:
@@ -447,7 +491,7 @@ with tab3:
         ("CSI 방어", f"CSI {opt_csi:.1f}배 ≥ 2.0", opt_csi >= 2.0),
         ("NOI 양수", f"연간 +{ann_noi:.1f}억원", ann_noi > 0),
         ("NPV 양수", f"{analysis_yrs}년 {npv_val:+.0f}억원", npv_val > 0),
-        ("IRR", f"{irr_val:.1f}% vs 할인율 {discount_rate}%", irr_val >= discount_rate),
+        ("IRR", f"{'계산불가' if np.isnan(irr_val) else f'{irr_val:.1f}%'} vs 할인율 {discount_rate}%", not np.isnan(irr_val) and irr_val >= discount_rate),
     ]
     for name, detail, ok in checks:
         icon = "✅" if ok else "❌"
