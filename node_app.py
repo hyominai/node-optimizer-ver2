@@ -84,8 +84,51 @@ with st.sidebar:
     comm_mgmt  = st.number_input("커뮤니티 공용관리비 (원/㎡·월)", value=1600, step=100)
 
     st.markdown("**NPV**")
-    discount_rate = st.slider("할인율 (실질, %)", 3.0, 10.0, 6.0, step=0.5)
-    analysis_yrs  = st.slider("분석 기간 (년)", 10, 30, 30)
+    discount_rate = st.slider("할인율 (실질, %)", 3.0, 10.0, 7.0, step=0.5)
+    analysis_yrs  = st.slider("분석 기간 (년)", 10, 30, 20)
+
+    st.markdown("---")
+    st.subheader("🏦 리츠(REITs) 구조")
+    use_reits     = st.checkbox("리츠 구조 적용", value=False)
+    fund_eq_ratio = st.slider("기금 출자 비율 (%)", 10, 50, 35, step=5)
+    fund_div_rate = st.slider("기금 배당률 (%)", 1.0, 5.0, 3.0, step=0.5)
+    soc_ratio     = st.slider("생활SOC 지원 비율 (%커뮤니티)", 0, 100, 75, step=5)
+
+    st.markdown("---")
+    if st.button("📋 현재 설정값 내보내기"):
+        st.code(f"""# 현재 설정값 (기본값으로 붙여넣기용)
+site_area      = {site_area}
+far_pct        = {far_pct}
+podium_area    = {podium_area}
+tower_area     = {tower_area}
+capex_res_base = {capex_res_base}
+capex_com_base = {capex_com_base}
+capex_comm_base= {capex_comm_base}
+land_price     = {land_price}
+demo_price     = {demo_price}
+eq_ratio       = {eq_ratio}
+hug_pct        = {hug_pct}
+loan_rate_hug  = {loan_rate_hug}
+loan_rate_pf   = {loan_rate_pf}
+loan_tenor     = {loan_tenor}
+const_period   = {const_period}
+vac_local      = {vac_local}
+node_count     = {node_count}
+total_pop      = {total_pop}
+solo_hh        = {solo_hh}
+existing_lib   = {existing_lib}
+existing_sport = {existing_sport}
+rent_res       = {rent_res}
+vac_res_1      = {vac_res_1}
+vac_res_2      = {vac_res_2}
+vac_res_3      = {vac_res_3}
+opex_res       = {opex_res}
+rent_com       = {rent_com}
+vac_com        = {vac_com}
+opex_com       = {opex_com}
+comm_mgmt      = {comm_mgmt}
+discount_rate  = {discount_rate}
+analysis_yrs   = {analysis_yrs}""", language="python")
 
 # ==========================================
 # 계산 함수
@@ -166,22 +209,52 @@ capex_land_total= site_area * land_price
 total_capex     = capex_res_total + capex_com_total + capex_comm_total + capex_land_total + capex_demo_total
 
 # 자금 조달
-deposit_res   = rent_res * 12 * area_res      # 주거 보증금 (월세 12개월)
-deposit_com   = 555232   * area_com           # 상업 보증금 (실측 중앙값)
-total_deposit = deposit_res + deposit_com     # 공사 시작 시 수령
+deposit_res   = rent_res * 12 * area_res
+deposit_com   = 555232   * area_com
+total_deposit = deposit_res + deposit_com
 
-hug_amount    = capex_res_total * hug_pct/100  # HUG 융자액
-pf_amount     = total_capex - hug_amount        # 민간PF 융자액
+# 생활SOC 보조금
+soc_grant_amt  = capex_comm_total * soc_ratio / 100
+net_capex_adj  = total_capex - soc_grant_amt
 
-equity        = total_capex * eq_ratio/100
-# 보증금 → 대출 감소로만 반영 (이중계산 방지)
-debt          = max(0, total_capex*(1-eq_ratio/100) - total_deposit)
+if use_reits:
+    # 리츠 구조
+    fund_equity_amt = net_capex_adj * fund_eq_ratio/100
+    private_eq_amt  = net_capex_adj * (eq_ratio/100 - fund_eq_ratio/100)
+    private_eq_amt  = max(private_eq_amt, net_capex_adj * 0.10)
+    pf_loan_amt     = net_capex_adj - fund_equity_amt - private_eq_amt
+    pf_after_amt    = max(0, pf_loan_amt - total_deposit)
+    lr_reits        = loan_rate_pf/100
+    af_reits        = (lr_reits*(1+lr_reits)**loan_tenor)/((1+lr_reits)**loan_tenor-1)
+    annual_ds_reits = pf_after_amt * af_reits
+    annual_fund_div = fund_equity_amt * fund_div_rate/100
+    equity          = private_eq_amt
+    debt_initial    = pf_loan_amt
+    debt_after_refi = pf_after_amt
+    annual_ds       = annual_ds_reits
+    blended_rate    = lr_reits
+else:
+    # 일반 PF 구조
+    soc_grant_amt  = 0  # 리츠 아닐 때 SOC 별도 처리
+    fund_equity_amt = 0
+    annual_fund_div = 0
 
-hug_ratio     = hug_amount / total_capex
-blended_rate  = loan_rate_hug/100 * hug_ratio + loan_rate_pf/100 * (1-hug_ratio)
-lr            = blended_rate
-af            = (lr*(1+lr)**loan_tenor)/((1+lr)**loan_tenor-1) if lr>0 else 1/loan_tenor
-annual_ds     = debt * af
+if not use_reits:
+    hug_amount      = capex_res_total * hug_pct/100
+    equity          = total_capex * eq_ratio/100
+    debt_initial    = max(0, total_capex*(1-eq_ratio/100))
+    hug_ratio       = hug_amount / total_capex
+    blended_rate    = loan_rate_hug/100*hug_ratio + loan_rate_pf/100*(1-hug_ratio)
+    lr              = blended_rate
+    debt_after_refi = max(0, debt_initial - total_deposit)
+    af_refi         = (lr*(1+lr)**loan_tenor)/((1+lr)**loan_tenor-1) if lr>0 else 1/loan_tenor
+    annual_ds       = debt_after_refi * af_refi
+    annual_fund_div = 0
+    fund_equity_amt = 0
+    soc_grant_amt   = 0
+else:
+    debt_after_refi = debt_after_refi
+    lr              = blended_rate
 
 # NOI
 def get_noi(vac_r):
@@ -190,8 +263,9 @@ def get_noi(vac_r):
     cc = comm_mgmt * area_comm * 12
     return (area_res*nr + area_com*nc)*12 - cc
 
-# CF (공사기간 반영)
-# 0년차: 자기자본 투입 (보증금은 대출 감소로 반영)
+# CF (공사기간 + 준공시점 보증금 조기상환 반영)
+# 보증금은 준공 첫해 현금 유입 + PF 원금 조기상환으로 처리
+# 0년차: 자기자본 투입
 initial_cf = -equity
 cf_list    = [initial_cf]
 noi_list, ds_list, net_list, cum_list = [], [], [], []
@@ -200,17 +274,34 @@ payback = None
 
 for y in range(1, analysis_yrs+1):
     if y <= const_period:
-        # 공사 기간: NOI 없음, 대출 이자만
-        interest = debt * blended_rate
-        noi   = 0
-        ds    = interest  # 공사중 이자만
+        # 공사중: NOI 없음, 초기대출 이자
+        noi = 0
+        ds  = debt_initial * lr
+
+    elif y == const_period + 1:
+        # 준공 첫해: NOI + 보증금 수령 + 잔여대출 기준 원리금
+        op_y  = 1
+        vac_r = vac_res_1
+        noi   = get_noi(vac_r)
+        ds    = annual_ds
+        net   = noi - ds - annual_fund_div + total_deposit
+        cum  += net
+        noi_list.append(noi/1e8)
+        ds_list.append(ds/1e8)
+        net_list.append(net/1e8)
+        cum_list.append(cum/1e8)
+        cf_list.append(net)
+        if payback is None and cum >= 0: payback = y
+        continue
+
     else:
-        op_y  = y - const_period  # 운영 연도
+        op_y  = y - const_period
         vac_r = vac_res_1 if op_y==1 else (vac_res_2 if op_y<=5 else vac_res_3)
         noi   = get_noi(vac_r)
         ds    = annual_ds if y <= loan_tenor + const_period else 0
-    net   = noi - ds
-    cum  += net
+
+    net  = noi - ds - annual_fund_div
+    cum += net
     noi_list.append(noi/1e8)
     ds_list.append(ds/1e8)
     net_list.append(net/1e8)
@@ -231,10 +322,14 @@ c1,c2,c3,c4,c5,c6 = st.columns(6)
 c1.metric("주거", f"{opt_res}%", f"{floors_res}층")
 c2.metric("상업", f"{opt_com}%", f"{floors_com}층")
 c3.metric("커뮤니티", f"{opt_comm}%", f"{floors_comm}층")
-c4.metric("총 CAPEX", f"{total_capex/1e8:.0f}억")
-c5.metric(f"{analysis_yrs}년 NPV", f"{npv_val:+.0f}억")
-c6.metric("IRR", f"{irr_val:.1f}%" if not np.isnan(irr_val) else "계산중",
-          "≥ 할인율 ✅" if not np.isnan(irr_val) and irr_val>=discount_rate else "< 할인율")
+c4.metric("총 CAPEX", f"{total_capex/1e8:.0f}억", "리츠 구조 ✅" if use_reits else "일반 PF")
+c5.metric(f"{analysis_yrs}년 NPV", f"{npv_val:+.0f}억", f"실투자 {equity/1e8:.0f}억" if use_reits else "")
+if np.isnan(irr_val):
+    c6.metric("IRR", "계산중", "")
+elif irr_val >= discount_rate:
+    c6.metric("IRR", f"{irr_val:.1f}%", f"✅ 할인율({discount_rate}%) 상회")
+else:
+    c6.metric("IRR", f"{irr_val:.1f}%", f"❌ 할인율({discount_rate}%) 미달")
 
 st.markdown("---")
 
@@ -378,8 +473,8 @@ with tab2:
 
     m1,m2,m3,m4,m5 = st.columns(5)
     m1.metric("총 CAPEX", f"{total_capex/1e8:.0f}억")
-    m2.metric("보증금 활용", f"{total_deposit/1e8:.0f}억")
-    m3.metric("실질 대출", f"{debt/1e8:.0f}억")
+    m2.metric("보증금 조기상환", f"{total_deposit/1e8:.0f}억", "준공시점 대출 상환")
+    m3.metric("실질 대출", f"{debt_after_refi/1e8:.0f}억", f"초기 {debt_initial/1e8:.0f}억 → 보증금 상환")
     m4.metric("투자 회수", f"{payback}년차" if payback else "초과")
     m5.metric("Funding Gap", f"{funding_gap:.0f}억" if funding_gap>0 else "없음 ✅")
 
